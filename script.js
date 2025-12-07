@@ -3,14 +3,12 @@ const SHEET_ID = "1uY2EGP7UkzMKTlhFr4vlO70ovk3yCpv4Rbo3SA7UJFk";
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
 const BUDGET_LIMIT = 1500;
 
-// ตัวแปร Global สำหรับเก็บ Chart Instance (เพื่อทำลายทิ้งก่อนวาดใหม่)
 let currentChart = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
     Chart.defaults.font.family = "'Prompt', sans-serif";
     Chart.defaults.color = '#888888';
 
-    // เช็คว่าอยู่หน้าไหน
     const hasDashboard = document.getElementById('display-amount');
     const hasUsageChart = document.getElementById('usageChart');
     const hasWarningChart = document.getElementById('warningChart');
@@ -22,17 +20,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         if (allData.length === 0) throw new Error("ไม่พบข้อมูลใน Google Sheet");
 
-        // 1. จัดการเรื่องเลือกห้อง (Room Selector)
-        // ดึงห้องที่เคยเลือกไว้จากความจำเครื่อง (ถ้าไม่มีให้เป็น 'all')
-        let savedRoom = localStorage.getItem('selectedRoom') || 'all';
+        // Debug: ดูว่าหัวตารางอ่านได้ว่าอะไรบ้าง
+        console.log("Headers detected:", Object.keys(allData[0]));
+        console.log("First Row Data:", allData[0]);
+
+        // 1. จัดการเรื่องเลือกห้อง
+        let savedRoom = 'all';
+        try { savedRoom = localStorage.getItem('selectedRoom') || 'all'; } catch(e){}
         
-        // ถ้าอยู่หน้า Dashboard ให้สร้าง Dropdown
         const roomSelector = document.getElementById('room-selector');
         if (roomSelector) {
             initRoomSelector(allData, roomSelector, savedRoom);
         }
 
-        // 2. กรองข้อมูลตามห้องที่เลือก
+        // 2. กรองข้อมูลตามห้อง
         const filteredData = filterDataByRoom(allData, savedRoom);
 
         // 3. แสดงผล
@@ -50,43 +51,40 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-// --- ROOM LOGIC ---
-
-function initRoomSelector(allData, selectorElement, currentRoom) {
-    // หา unique room_number ทั้งหมด
-    const rooms = [...new Set(allData.map(item => item.room_number).filter(r => r))];
-
-    // [แก้ไข] เรียงลำดับแบบตัวเลข (น้อยไปมาก)
-    rooms.sort((a, b) => {
-        return parseFloat(a) - parseFloat(b);
-    });
-
-    // สร้าง Options
-    let html = `<option value="all">ภาพรวมทุกห้อง (${rooms.length} ห้อง)</option>`;
-    rooms.forEach(room => {
-        const isSelected = room === currentRoom ? 'selected' : '';
-        html += `<option value="${room}" ${isSelected}>ห้อง ${room}</option>`;
-    });
+// --- HELPER: ตัวตัด CSV แบบฉลาด (รองรับ "1,000" และ "amount_paid") ---
+function splitCSVLine(str) {
+    const result = [];
+    let current = '';
+    let inQuote = false;
     
-    selectorElement.innerHTML = html;
-
-    // เมื่อมีการเปลี่ยนห้อง
-    selectorElement.addEventListener('change', (e) => {
-        const newRoom = e.target.value;
-        // บันทึกลงเครื่อง
-        localStorage.setItem('selectedRoom', newRoom);
-        // รีโหลดหน้าเว็บเพื่อคำนวณใหม่
-        window.location.reload();
-    });
+    for (let i = 0; i < str.length; i++) {
+        const char = str[i];
+        if (char === '"') {
+            inQuote = !inQuote; // เจอฟันหนู ให้สลับสถานะ
+        } else if (char === ',' && !inQuote) {
+            // เจอคอมม่า และไม่ได้อยู่ในฟันหนู -> ตัดคำ
+            result.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    result.push(current);
+    return result;
 }
 
-function filterDataByRoom(data, room) {
-    if (!room || room === 'all') return data;
-    // กรองเฉพาะแถวที่ room_number ตรงกับที่เลือก
-    return data.filter(row => row.room_number == room);
+// --- HELPER: ล้างฟันหนูออกจากข้อความ ---
+function cleanCSVValue(val) {
+    if (!val) return "";
+    let clean = val.trim();
+    // ลบฟันหนูหัวท้าย ถ้ามี (เช่น "1,000" -> 1,000)
+    if (clean.startsWith('"') && clean.endsWith('"')) {
+        clean = clean.substring(1, clean.length - 1);
+    }
+    return clean;
 }
 
-// --- DATA FETCHING ---
+// --- DATA FETCHING & PARSING ---
 async function fetchCSV() {
     const response = await fetch(CSV_URL);
     if (!response.ok) throw new Error("เชื่อมต่อ Google Sheet ไม่สำเร็จ");
@@ -97,20 +95,32 @@ function parseCSV(csvText) {
     const lines = csvText.trim().split('\n');
     if (lines.length < 2) return [];
 
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^[\uFEFF\uFFFE]/, '').toLowerCase());
+    // 1. แกะ Header ด้วยตัวตัดแบบฉลาด
+    const headersRaw = splitCSVLine(lines[0]);
+    const headers = headersRaw.map(h => cleanCSVValue(h).toLowerCase().replace(/^[\uFEFF\uFFFE]/, ''));
+    
     const data = [];
 
     for (let i = 1; i < lines.length; i++) {
-        const currentline = lines[i].split(',');
+        // 2. แกะข้อมูลแต่ละแถวด้วยตัวตัดแบบฉลาด
+        const currentline = splitCSVLine(lines[i]);
         const obj = {};
         let hasData = false;
 
         for (let j = 0; j < headers.length; j++) {
             let headerName = headers[j];
-            let val = (currentline[j] || "").trim();
-            if (!obj.hasOwnProperty(headerName)) {
-                obj[headerName] = val;
+            // ล้างค่าข้อมูล (เอาฟันหนูออก)
+            let val = cleanCSVValue(currentline[j] || "");
+
+            // Logic: ถ้าเจอคอลัมน์ชื่อ amount_paid ให้บันทึกทันที (ไม่สนว่าซ้ำไหม เอาตัวที่มีค่า)
+            if (headerName === 'amount_paid') {
+                 if (val !== "") obj[headerName] = val;
+            } else {
+                if (!obj.hasOwnProperty(headerName) || (obj[headerName] === "" && val !== "")) {
+                    obj[headerName] = val;
+                }
             }
+            
             if (val !== "") hasData = true;
         }
 
@@ -121,7 +131,31 @@ function parseCSV(csvText) {
     return data;
 }
 
-// --- HELPER ---
+// --- ROOM LOGIC ---
+function initRoomSelector(allData, selectorElement, currentRoom) {
+    const rooms = [...new Set(allData.map(item => item.room_number).filter(r => r))];
+    rooms.sort((a, b) => parseFloat(a) - parseFloat(b));
+
+    let html = `<option value="all">ภาพรวมทุกห้อง (${rooms.length} ห้อง)</option>`;
+    rooms.forEach(room => {
+        const isSelected = room === currentRoom ? 'selected' : '';
+        html += `<option value="${room}" ${isSelected}>ห้อง ${room}</option>`;
+    });
+    selectorElement.innerHTML = html;
+
+    selectorElement.addEventListener('change', (e) => {
+        const newRoom = e.target.value;
+        try { localStorage.setItem('selectedRoom', newRoom); } catch(e){}
+        window.location.reload();
+    });
+}
+
+function filterDataByRoom(data, room) {
+    if (!room || room === 'all') return data;
+    return data.filter(row => row.room_number == room);
+}
+
+// --- HELPER FUNCTIONS ---
 function safeSetText(id, text) {
     const el = document.getElementById(id);
     if (el) el.innerText = (text === undefined || text === null || text === "") ? "-" : text;
@@ -152,36 +186,48 @@ function animateValue(id, start, end, duration) {
     window.requestAnimationFrame(step);
 }
 
-// --- RENDER FUNCTIONS ---
-
+// --- RENDER DASHBOARD ---
 function renderDashboard(data) {
     const validData = data.filter(row => parseDate(row.timestamp) !== null);
     if (validData.length === 0) {
         safeSetText('display-amount', "0");
-        safeSetText('last-update', "ไม่พบข้อมูลของห้องนี้");
+        safeSetText('last-update', "ไม่พบข้อมูล");
         return;
     }
 
     validData.sort((a, b) => parseDate(a.timestamp) - parseDate(b.timestamp));
 
-    let totalCost = 0;
-    validData.forEach(row => {
-        totalCost += parseFloat(row.cost_baht || 0);
-    });
+    // หาแถวที่มี amount_paid ล่าสุด
+    let targetRow = null;
+    let displayAmount = 0;
 
-    const lastRow = validData[validData.length - 1];
-    const lastDate = lastRow.timestamp;
+    for (let i = validData.length - 1; i >= 0; i--) {
+        let row = validData[i];
+        if (row.amount_paid && row.amount_paid.trim() !== "") {
+            // ลบลูกน้ำออกก่อนแปลงเป็นตัวเลข
+            let val = parseFloat(row.amount_paid.replace(/,/g, ''));
+            if (!isNaN(val)) {
+                targetRow = row;
+                displayAmount = val;
+                break;
+            }
+        }
+    }
 
-    animateValue("display-amount", 0, totalCost, 1000);
+    if (!targetRow) targetRow = validData[validData.length - 1];
 
-    const percent = (totalCost / BUDGET_LIMIT) * 100;
+    console.log("Dashboard Row:", targetRow);
+    console.log("Amount to show:", displayAmount);
+
+    animateValue("display-amount", 0, displayAmount, 1000);
+
+    const percent = (displayAmount / BUDGET_LIMIT) * 100;
     safeSetStyle('progress-fill', 'width', `${Math.min(percent, 100)}%`);
-    safeSetText('progress-text', `${Math.floor(totalCost)} ฿ / ${BUDGET_LIMIT} ฿`);
 
-    if (lastDate) safeSetText('last-update', `อัปเดตล่าสุด: ${lastDate}`);
+    if (targetRow.timestamp) safeSetText('last-update', `อัปเดตล่าสุด: ${targetRow.timestamp}`);
 
     // Logic สี
-    const sheetLevel = (lastRow.level || "normal").toLowerCase().trim();
+    const sheetLevel = (targetRow.level || "normal").toLowerCase().trim();
     const warningCard = document.getElementById('warning-card-status');
     if (warningCard) warningCard.className = "card warning-card";
 
@@ -219,12 +265,11 @@ function renderDashboard(data) {
     safeSetStyle('progress-fill', 'backgroundColor', color);
 }
 
+// --- RENDER USAGE CHART ---
 function renderUsagePage(data) {
     const validData = data.filter(row => parseDate(row.timestamp) !== null);
     validData.sort((a, b) => parseDate(a.timestamp) - parseDate(b.timestamp));
     
-    // ถ้าเลือกห้องเดียว ให้โชว์ 20 จุดล่าสุด
-    // ถ้าเลือก "ภาพรวมทุกห้อง" ข้อมูลจะเยอะมาก อาจจะต้องโชว์แบบรวม (ในที่นี้ขอโชว์ 20 จุดล่าสุดของข้อมูลรวมไปก่อน)
     const recentData = validData.slice(-20);
 
     const labels = recentData.map(row => {
@@ -235,9 +280,7 @@ function renderUsagePage(data) {
 
     const ctx = document.getElementById('usageChart');
     if (ctx) {
-        // Destroy old chart if exists
         if (currentChart) currentChart.destroy();
-
         currentChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -270,6 +313,7 @@ function renderUsagePage(data) {
     }
 }
 
+// --- RENDER WARNING CHART ---
 function renderWarningPage(data) {
     const validData = data.filter(row => parseDate(row.timestamp) !== null);
     validData.sort((a, b) => parseDate(a.timestamp) - parseDate(b.timestamp));
@@ -282,7 +326,6 @@ function renderWarningPage(data) {
     validData.forEach((row, index) => {
         cumulativeCost += parseFloat(row.cost_baht || 0);
 
-        // Sampling: ถ้าข้อมูลเยอะเกิน 50 จุด ให้ลดจำนวนจุดลงเพื่อความสวยงาม
         if (validData.length > 50 && index % 5 !== 0 && index !== validData.length - 1) {
             return; 
         }
@@ -340,6 +383,7 @@ function renderWarningPage(data) {
     }
 }
 
+// --- RENDER BREAKDOWN ---
 function renderBreakdownPage(data) {
     let dayUsage = 0;
     let nightUsage = 0;
