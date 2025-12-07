@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bill Shock Early Warning</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="app-container">
+
+        <header class="main-header">
+            <h1>Bill-shock early warning</h1>
+            <div class="level-indicator">Level: <span id="level-text">Loading...</span></div>
+        </header>
+
+        <!-- 1. Warning Section (Dynamic Color) -->
+        <a href="warning.html" class="card warning-card" id="warning-card-status">
+            <div class="warning-content">
+                <div class="warning-title" id="warning-title">Checking...</div>
+                <div class="warning-desc" id="warning-desc">กำลังวิเคราะห์ข้อมูลการใช้ไฟ...</div>
+            </div>
+            <div class="action-link">
+                <span>รายละเอียด</span>
+                <i class="ph ph-caret-right"></i>
+            </div>
+        </a>
+
+        <!-- 2. Usage Section -->
+        <a href="usage.html" class="card usage-card">
+            <div class="card-top">
+                <span class="label">ยอดค่าไฟที่ใช้แล้ว (เดือนนี้)</span>
+                <div class="action-link">
+                    <span>รายละเอียด</span>
+                    <i class="ph ph-caret-right"></i>
+                </div>
+            </div>
+
+            <div class="amount-display">
+                <span class="currency">฿</span>
+                <span class="number" id="display-amount">0</span>
+            </div>
+
+            <div class="progress-section">
+                <div class="progress-info">
+                    <span>ใช้ไปแล้ว</span>
+                    <span id="progress-text">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+                </div>
+                <div style="margin-top: 8px; font-size: 12px; color: #888; text-align: right;" id="last-update">
+                    กำลังเชื่อมต่อ Google Sheet...
+                </div>
+            </div>
+        </a>
+
+        <!-- 3. Services Section -->
+        <div class="section-title">บริการอื่นๆ</div>
+
+        <div class="grid-menu">
+            <a href="download.html" class="menu-item">
+                <div class="icon-box"><i class="ph ph-file-text"></i></div>
+                <span>บิลย้อนหลัง</span>
+            </a>
+            <a href="breakdown.html" class="menu-item">
+                <div class="icon-box"><i class="ph ph-chart-pie-slice"></i></div>
+                <span>สัดส่วนการใช้</span>
+            </a>
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="script.js"></script>
+
+</body>
+</html>
