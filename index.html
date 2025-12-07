@@ -19,6 +19,15 @@
         <header class="main-header">
             <h1>Bill-shock early warning</h1>
             <div class="level-indicator">Level: <span id="level-text">Loading...</span></div>
+            <!-- ส่วนเลือกห้อง (Search / Filter) -->
+            <div class="search-section">
+                <div class="search-box">
+                    <i class="ph ph-magnifying-glass"></i>
+                    <select id="room-selector">
+                        <option value="all">กำลังโหลดรายชื่อห้อง...</option>
+                    </select>
+                </div>
+            </div>
         </header>
 
         <!-- 1. Warning Section (Dynamic Color) -->
@@ -49,13 +58,6 @@
             </div>
 
             <div class="progress-section">
-                <div class="progress-info">
-                    <span>ใช้ไปแล้ว</span>
-                    <span id="progress-text">0%</span>
-                </div>
-                <div class="progress-track">
-                    <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
-                </div>
                 <div style="margin-top: 8px; font-size: 12px; color: #888; text-align: right;" id="last-update">
                     กำลังเชื่อมต่อ Google Sheet...
                 </div>

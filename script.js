@@ -3,10 +3,14 @@ const SHEET_ID = "1uY2EGP7UkzMKTlhFr4vlO70ovk3yCpv4Rbo3SA7UJFk";
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
 const BUDGET_LIMIT = 1500;
 
+// ตัวแปร Global สำหรับเก็บ Chart Instance (เพื่อทำลายทิ้งก่อนวาดใหม่)
+let currentChart = null;
+
 document.addEventListener("DOMContentLoaded", async () => {
     Chart.defaults.font.family = "'Prompt', sans-serif";
     Chart.defaults.color = '#888888';
 
+    // เช็คว่าอยู่หน้าไหน
     const hasDashboard = document.getElementById('display-amount');
     const hasUsageChart = document.getElementById('usageChart');
     const hasWarningChart = document.getElementById('warningChart');
@@ -14,17 +18,28 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     try {
         const rawData = await fetchCSV();
-        const data = parseCSV(rawData);
+        const allData = parseCSV(rawData);
 
-        if (data.length === 0) throw new Error("ไม่พบข้อมูลใน Google Sheet");
+        if (allData.length === 0) throw new Error("ไม่พบข้อมูลใน Google Sheet");
 
-        // Log ดูข้อมูลแถวล่าสุด เพื่อเช็คว่าดึงมาครบไหม (กด F12 ดู Console)
-        console.log("ข้อมูลแถวล่าสุด:", data[data.length - 1]);
+        // 1. จัดการเรื่องเลือกห้อง (Room Selector)
+        // ดึงห้องที่เคยเลือกไว้จากความจำเครื่อง (ถ้าไม่มีให้เป็น 'all')
+        let savedRoom = localStorage.getItem('selectedRoom') || 'all';
+        
+        // ถ้าอยู่หน้า Dashboard ให้สร้าง Dropdown
+        const roomSelector = document.getElementById('room-selector');
+        if (roomSelector) {
+            initRoomSelector(allData, roomSelector, savedRoom);
+        }
 
-        if (hasDashboard) renderDashboard(data);
-        if (hasUsageChart) renderUsagePage(data);
-        if (hasWarningChart) renderWarningPage(data);
-        if (hasPieChart) renderBreakdownPage(data);
+        // 2. กรองข้อมูลตามห้องที่เลือก
+        const filteredData = filterDataByRoom(allData, savedRoom);
+
+        // 3. แสดงผล
+        if (hasDashboard) renderDashboard(filteredData);
+        if (hasUsageChart) renderUsagePage(filteredData);
+        if (hasWarningChart) renderWarningPage(filteredData);
+        if (hasPieChart) renderBreakdownPage(filteredData);
 
     } catch (error) {
         console.error("Critical Error:", error);
@@ -35,7 +50,43 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-// --- 1. DATA FETCHING & PARSING (แก้ไข: แก้ปัญหาคอลัมน์ซ้ำ) ---
+// --- ROOM LOGIC ---
+
+function initRoomSelector(allData, selectorElement, currentRoom) {
+    // หา unique room_number ทั้งหมด
+    const rooms = [...new Set(allData.map(item => item.room_number).filter(r => r))];
+
+    // [แก้ไข] เรียงลำดับแบบตัวเลข (น้อยไปมาก)
+    rooms.sort((a, b) => {
+        return parseFloat(a) - parseFloat(b);
+    });
+
+    // สร้าง Options
+    let html = `<option value="all">ภาพรวมทุกห้อง (${rooms.length} ห้อง)</option>`;
+    rooms.forEach(room => {
+        const isSelected = room === currentRoom ? 'selected' : '';
+        html += `<option value="${room}" ${isSelected}>ห้อง ${room}</option>`;
+    });
+    
+    selectorElement.innerHTML = html;
+
+    // เมื่อมีการเปลี่ยนห้อง
+    selectorElement.addEventListener('change', (e) => {
+        const newRoom = e.target.value;
+        // บันทึกลงเครื่อง
+        localStorage.setItem('selectedRoom', newRoom);
+        // รีโหลดหน้าเว็บเพื่อคำนวณใหม่
+        window.location.reload();
+    });
+}
+
+function filterDataByRoom(data, room) {
+    if (!room || room === 'all') return data;
+    // กรองเฉพาะแถวที่ room_number ตรงกับที่เลือก
+    return data.filter(row => row.room_number == room);
+}
+
+// --- DATA FETCHING ---
 async function fetchCSV() {
     const response = await fetch(CSV_URL);
     if (!response.ok) throw new Error("เชื่อมต่อ Google Sheet ไม่สำเร็จ");
@@ -46,9 +97,7 @@ function parseCSV(csvText) {
     const lines = csvText.trim().split('\n');
     if (lines.length < 2) return [];
 
-    // Clean Headers
     const headers = lines[0].split(',').map(h => h.trim().replace(/^[\uFEFF\uFFFE]/, '').toLowerCase());
-    
     const data = [];
 
     for (let i = 1; i < lines.length; i++) {
@@ -59,13 +108,9 @@ function parseCSV(csvText) {
         for (let j = 0; j < headers.length; j++) {
             let headerName = headers[j];
             let val = (currentline[j] || "").trim();
-
-            // [แก้ไขสำคัญ] ถ้ามีค่าใน obj แล้ว (แปลว่าเจอคอลัมน์ชื่อซ้ำไปแล้ว) ให้ข้าม
-            // เพื่อยึดข้อมูลจากคอลัมน์แรกสุดเป็นหลัก
             if (!obj.hasOwnProperty(headerName)) {
                 obj[headerName] = val;
             }
-            
             if (val !== "") hasData = true;
         }
 
@@ -76,13 +121,10 @@ function parseCSV(csvText) {
     return data;
 }
 
-// --- HELPER FUNCTIONS ---
+// --- HELPER ---
 function safeSetText(id, text) {
     const el = document.getElementById(id);
-    if (el) {
-        // ถ้าค่าเป็น undefined หรือ null ให้แสดง -
-        el.innerText = (text === undefined || text === null || text === "") ? "-" : text;
-    }
+    if (el) el.innerText = (text === undefined || text === null || text === "") ? "-" : text;
 }
 
 function safeSetStyle(id, property, value) {
@@ -97,10 +139,28 @@ function parseDate(dateString) {
     return isNaN(date) ? null : date;
 }
 
-// --- 2. DASHBOARD LOGIC ---
+function animateValue(id, start, end, duration) {
+    const obj = document.getElementById(id);
+    if (!obj) return;
+    let startTimestamp = null;
+    const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        obj.innerHTML = Math.floor(progress * (end - start) + start).toLocaleString();
+        if (progress < 1) window.requestAnimationFrame(step);
+    };
+    window.requestAnimationFrame(step);
+}
+
+// --- RENDER FUNCTIONS ---
+
 function renderDashboard(data) {
     const validData = data.filter(row => parseDate(row.timestamp) !== null);
-    if (validData.length === 0) return;
+    if (validData.length === 0) {
+        safeSetText('display-amount', "0");
+        safeSetText('last-update', "ไม่พบข้อมูลของห้องนี้");
+        return;
+    }
 
     validData.sort((a, b) => parseDate(a.timestamp) - parseDate(b.timestamp));
 
@@ -156,13 +216,15 @@ function renderDashboard(data) {
         safeSetStyle('level-text', 'color', '#27AE60');
         color = '#27AE60';
     }
-    
+    safeSetStyle('progress-fill', 'backgroundColor', color);
 }
 
-// --- 3. USAGE CHART (แก้ไข: แสดงข้อมูล Insight) ---
 function renderUsagePage(data) {
     const validData = data.filter(row => parseDate(row.timestamp) !== null);
     validData.sort((a, b) => parseDate(a.timestamp) - parseDate(b.timestamp));
+    
+    // ถ้าเลือกห้องเดียว ให้โชว์ 20 จุดล่าสุด
+    // ถ้าเลือก "ภาพรวมทุกห้อง" ข้อมูลจะเยอะมาก อาจจะต้องโชว์แบบรวม (ในที่นี้ขอโชว์ 20 จุดล่าสุดของข้อมูลรวมไปก่อน)
     const recentData = validData.slice(-20);
 
     const labels = recentData.map(row => {
@@ -173,7 +235,10 @@ function renderUsagePage(data) {
 
     const ctx = document.getElementById('usageChart');
     if (ctx) {
-        new Chart(ctx, {
+        // Destroy old chart if exists
+        if (currentChart) currentChart.destroy();
+
+        currentChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
@@ -196,21 +261,16 @@ function renderUsagePage(data) {
         });
     }
 
-    // Insight Data
     const lastRow = validData[validData.length - 1];
-    
-    // Debug: ดูว่าค่ามาไหม
-    console.log("Last Row for Insight:", lastRow);
-
-    safeSetText('insight-room', lastRow.room_number);
-    safeSetText('insight-meter', lastRow.kwh_reading ? lastRow.kwh_reading + " kWh" : "-");
-    safeSetText('insight-power', lastRow.power_watts ? lastRow.power_watts + " W" : "-");
-    safeSetText('insight-cost', lastRow.cost_baht ? parseFloat(lastRow.cost_baht).toFixed(2) + " ฿" : "-");
+    if(lastRow) {
+        safeSetText('insight-room', lastRow.room_number);
+        safeSetText('insight-meter', lastRow.kwh_reading ? lastRow.kwh_reading + " หน่วย" : "-");
+        safeSetText('insight-power', lastRow.power_watts ? lastRow.power_watts + " W" : "-");
+        safeSetText('insight-cost', lastRow.cost_baht ? parseFloat(lastRow.cost_baht).toFixed(2) + " ฿" : "-");
+    }
 }
 
-// --- 4. WARNING CHART (แก้ไข: คำนวณเงินทุกแถว ไม่ให้ยอดหาย) ---
 function renderWarningPage(data) {
-    // 1. กรองและเรียงข้อมูล
     const validData = data.filter(row => parseDate(row.timestamp) !== null);
     validData.sort((a, b) => parseDate(a.timestamp) - parseDate(b.timestamp));
 
@@ -219,42 +279,30 @@ function renderWarningPage(data) {
     const budgetData = [];
     const labels = [];
 
-    // 2. วนลูปข้อมูล
     validData.forEach((row, index) => {
-        // [จุดที่แก้ไข] บวกเงิน "ทุกแถว" (ห้ามข้าม)
         cumulativeCost += parseFloat(row.cost_baht || 0);
 
-        // 3. การลดจำนวนจุดกราฟ (Sampling) เพื่อไม่ให้กราฟรก
-        // จะทำ "หลังจาก" บวกเงินเสร็จแล้วเท่านั้น
-        // (โชว์ทุกๆ 5 จุด หรือจุดสุดท้ายต้องโชว์เสมอ)
+        // Sampling: ถ้าข้อมูลเยอะเกิน 50 จุด ให้ลดจำนวนจุดลงเพื่อความสวยงาม
         if (validData.length > 50 && index % 5 !== 0 && index !== validData.length - 1) {
             return; 
         }
 
-        // 4. เก็บข้อมูลลงกราฟ
         costData.push(cumulativeCost);
         budgetData.push(BUDGET_LIMIT);
-
-        // สร้าง Label วันที่ (เช่น 07/12)
         const dateObj = parseDate(row.timestamp);
-        const dateShort = dateObj ? 
-            `${dateObj.getDate()}/${dateObj.getMonth() + 1}` : 
-            row.timestamp.split(' ')[0];
-            
+        const dateShort = dateObj ? `${dateObj.getDate()}/${dateObj.getMonth() + 1}` : row.timestamp.split(' ')[0];
         labels.push(dateShort);
     });
 
-    // 5. วาดกราฟ
     const ctx = document.getElementById('warningChart');
     if (ctx) {
+        if (currentChart) currentChart.destroy();
         const ctx2d = ctx.getContext('2d');
-        
-        // Gradient สีแดงสวยๆ
         const gradient = ctx2d.createLinearGradient(0, 0, 0, 400);
         gradient.addColorStop(0, 'rgba(255, 82, 82, 0.6)');
         gradient.addColorStop(1, 'rgba(255, 82, 82, 0.0)');
 
-        new Chart(ctx2d, {
+        currentChart = new Chart(ctx2d, {
             type: 'line',
             data: {
                 labels: labels,
@@ -266,14 +314,14 @@ function renderWarningPage(data) {
                         backgroundColor: gradient,
                         fill: true,
                         tension: 0.4,
-                        pointRadius: 0, // ซ่อนจุดเล็กๆ
+                        pointRadius: 0,
                         pointHoverRadius: 6
                     },
                     {
                         label: `งบประมาณ (${BUDGET_LIMIT} บ.)`,
                         data: budgetData,
                         borderColor: '#333',
-                        borderDash: [5, 5], // เส้นประ
+                        borderDash: [5, 5],
                         pointRadius: 0,
                         borderWidth: 1.5
                     }
@@ -283,31 +331,15 @@ function renderWarningPage(data) {
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': ' + Math.floor(context.raw) + ' บาท';
-                            }
-                        }
-                    }
-                },
                 scales: {
-                    x: { 
-                        grid: { display: false }, 
-                        ticks: { maxTicksLimit: 6 } // จำกัดจำนวนวันที่โชว์แกน X
-                    },
-                    y: { 
-                        beginAtZero: true,
-                        grid: { color: '#f5f5f5' }
-                    }
+                    x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
+                    y: { beginAtZero: true, grid: { color: '#f5f5f5' } }
                 }
             }
         });
     }
 }
 
-// --- 5. BREAKDOWN ---
 function renderBreakdownPage(data) {
     let dayUsage = 0;
     let nightUsage = 0;
@@ -330,7 +362,8 @@ function renderBreakdownPage(data) {
 
     const ctx = document.getElementById('pieChart');
     if (ctx) {
-        new Chart(ctx, {
+        if (currentChart) currentChart.destroy();
+        currentChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: ['กลางวัน (Peak)', 'กลางคืน (Off-Peak)'],
@@ -350,20 +383,7 @@ function renderBreakdownPage(data) {
     }
 }
 
-// --- UTILS ---
-function animateValue(id, start, end, duration) {
-    const obj = document.getElementById(id);
-    if (!obj) return;
-    let startTimestamp = null;
-    const step = (timestamp) => {
-        if (!startTimestamp) startTimestamp = timestamp;
-        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-        obj.innerHTML = Math.floor(progress * (end - start) + start).toLocaleString();
-        if (progress < 1) window.requestAnimationFrame(step);
-    };
-    window.requestAnimationFrame(step);
-}
-
+// --- INTERACTION ---
 function showPlanList() {
     const start = document.getElementById('step-start');
     const selection = document.getElementById('step-selection');

@@ -509,3 +509,42 @@ body {
     .action-section { text-align: left; }
     .result-box { text-align: left; align-items: flex-start; display: flex; flex-direction: column; }
 }
+
+/* --- Search Section --- */
+.search-section {
+    margin-bottom: 24px;
+}
+
+.search-box {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 4px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow);
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.search-box:focus-within {
+    border-color: var(--text-main);
+}
+
+.search-box i {
+    font-size: 20px;
+    color: var(--text-sub);
+}
+
+.search-box select {
+    width: 100%;
+    border: none;
+    background: transparent;
+    padding: 12px 0;
+    font-size: 16px;
+    font-family: 'Prompt', sans-serif;
+    color: var(--text-main);
+    outline: none;
+    cursor: pointer;
+    appearance: none; /* ลบลูกศรเดิมของ Browser */
+}
