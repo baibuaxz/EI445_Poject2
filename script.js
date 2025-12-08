@@ -136,7 +136,7 @@ function initRoomSelector(allData, selectorElement, currentRoom) {
     const rooms = [...new Set(allData.map(item => item.room_number).filter(r => r))];
     rooms.sort((a, b) => parseFloat(a) - parseFloat(b));
 
-    let html = `<option value="all">ภาพรวมทุกห้อง (${rooms.length} ห้อง)</option>`;
+    let html = `<option value="all"> เลือกห้อง </option>`;
     rooms.forEach(room => {
         const isSelected = room === currentRoom ? 'selected' : '';
         html += `<option value="${room}" ${isSelected}>ห้อง ${room}</option>`;
